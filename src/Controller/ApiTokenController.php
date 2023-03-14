@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
@@ -20,33 +21,57 @@ use Symfony\Component\Serializer\SerializerInterface;
 class ApiTokenController extends AbstractController
 {
     #[Route('/api/api_token', name: 'api_token_post')]
-    public function tokenPost(EntityManagerInterface $entityManager, Request $request, LoggerInterface $logger,
-                                 UserPasswordHasherInterface $hasher, TokenGenerator $tokenGenerator, SerializerInterface $serializer, ApiTokenManager $apiTokenManager): Response
+    public function tokenPost(
+        EntityManagerInterface $entityManager,
+        Request $request,
+        LoggerInterface $logger,
+        UserPasswordHasherInterface $hasher,
+        TokenGenerator $tokenGenerator,
+        SerializerInterface $serializer,
+        ApiTokenManager $apiTokenManager
+    ): Response
     {
         try {
-            $entityManager->beginTransaction();
-            $data = json_decode($request->getContent(), true);
-            if (!empty($data['email']) && !empty($data['password'])) {
-                $user = $entityManager->getRepository(User::class)->findOneBy(['email' => $data['email']]);
+            if ($request->getMethod() === 'POST') {
+                $entityManager->beginTransaction();
+                $data = json_decode($request->getContent(), true);
+                if (!empty($data['email']) && !empty($data['password'])) {
+                    $user = $entityManager->getRepository(User::class)->findOneBy(['email' => $data['email']]);
 
-                if ($user && $hasher->isPasswordValid($user, $data['password'])) {
-                    $tokenData = $apiTokenManager->createApiToken($data, $tokenGenerator, $user);
-                    $entityManager->commit();
-                    $response = new Response($serializer->serialize($tokenData, 'json'));
-                    $response->setStatusCode(200);
+                    if ($user && $hasher->isPasswordValid($user, $data['password'])) {
+                        if (!empty($user->getApiToken()) && $user->getApiToken()->hasExpired() === false) {
+                            $response = new Response($serializer->serialize($user->getApiToken(), 'json'));
+                            $response->setStatusCode(200);
+
+                            return $response;
+                        } else {
+                            $tokenData = $apiTokenManager->createApiToken($data, $tokenGenerator, $user);
+                            $entityManager->commit();
+                            $response = new Response($serializer->serialize($tokenData, 'json'));
+                            $response->setStatusCode(200);
+
+                            return $response;
+                        }
+                    } else {
+                        $response = new JsonResponse("Invalid credential");
+                        $response->setStatusCode(422);
+
+                        return $response;
+                    }
                 } else {
-                    $response = new Response( "Invalid credential");
+                    $response = new JsonResponse("'email' and 'password' are required field");
                     $response->setStatusCode(422);
-                }
-            } else {
-                $response = new Response( "'email' and 'password' are required field");
-                $response->setStatusCode(422);
-            }
 
+                    return $response;
+                }
+            }
         } catch (\Exception $exception) {
             $entityManager->rollback();
             $logger->error($exception->getMessage());
         }
+
+        $response = new JsonResponse("Something happened");
+        $response->setStatusCode(422);
 
         return $response;
     }
