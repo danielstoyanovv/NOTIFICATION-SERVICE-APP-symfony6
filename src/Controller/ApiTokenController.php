@@ -4,7 +4,6 @@ namespace App\Controller;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
-use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
@@ -15,7 +14,6 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use App\Service\TokenGenerator;
 use App\Service\ApiTokenManager;
-use Symfony\Component\Serializer\SerializerInterface;
 
 #[AsController]
 class ApiTokenController extends AbstractController
@@ -27,10 +25,8 @@ class ApiTokenController extends AbstractController
         LoggerInterface $logger,
         UserPasswordHasherInterface $hasher,
         TokenGenerator $tokenGenerator,
-        SerializerInterface $serializer,
         ApiTokenManager $apiTokenManager
-    ): Response
-    {
+    ): Response {
         try {
             if ($request->getMethod() === 'POST') {
                 $entityManager->beginTransaction();
@@ -40,29 +36,17 @@ class ApiTokenController extends AbstractController
 
                     if ($user && $hasher->isPasswordValid($user, $data['password'])) {
                         if (!empty($user->getApiToken()) && $user->getApiToken()->hasExpired() === false) {
-                            $response = new Response($serializer->serialize($user->getApiToken(), 'json'));
-                            $response->setStatusCode(200);
-
-                            return $response;
+                            return $this->json($user->getApiToken());
                         } else {
                             $tokenData = $apiTokenManager->createApiToken($data, $tokenGenerator, $user);
                             $entityManager->commit();
-                            $response = new Response($serializer->serialize($tokenData, 'json'));
-                            $response->setStatusCode(200);
-
-                            return $response;
+                            return $this->json($tokenData, Response::HTTP_CREATED);
                         }
                     } else {
-                        $response = new JsonResponse("Invalid credential");
-                        $response->setStatusCode(422);
-
-                        return $response;
+                        return $this->json("Invalid credential", Response::HTTP_UNAUTHORIZED);
                     }
                 } else {
-                    $response = new JsonResponse("'email' and 'password' are required field");
-                    $response->setStatusCode(422);
-
-                    return $response;
+                    return $this->json("'email' and 'password' are required field", Response::HTTP_UNPROCESSABLE_ENTITY);
                 }
             }
         } catch (\Exception $exception) {
@@ -70,9 +54,6 @@ class ApiTokenController extends AbstractController
             $logger->error($exception->getMessage());
         }
 
-        $response = new JsonResponse("Something happened");
-        $response->setStatusCode(422);
-
-        return $response;
+        return $this->json('Invalid credentials', Response::HTTP_FORBIDDEN);
     }
 }
